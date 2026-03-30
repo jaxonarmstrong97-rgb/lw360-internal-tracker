@@ -1481,6 +1481,7 @@ function CampaignDetail({ campaign: initialCampaign, orgs, onBack, onRefresh }) 
   const [loading, setLoading] = useState(true)
   const [confirmText, setConfirmText] = useState('')
   const [showFinalize, setShowFinalize] = useState(false)
+  const [copiedId, setCopiedId] = useState(null)
 
   const org = orgs.find(o => o.id === campaign.organization_id)
 
@@ -1682,6 +1683,17 @@ function CampaignDetail({ campaign: initialCampaign, orgs, onBack, onRefresh }) 
                     {!emp.email_opened_at && emp.enrollment_email_sent_at && <span title="Sent" style={{ fontSize: 13 }}>✉️</span>}
                     {emp.enrollment_status === 'Opted Out' && <span title="Opted Out" style={{ fontSize: 13 }}>❌</span>}
                     <span style={{ fontSize: 11, color: '#64748b' }}>{emp.enrollment_status || 'Pending'}</span>
+                    {emp.portal_token && (
+                      <button
+                        title="Copy portal link"
+                        onClick={() => {
+                          navigator.clipboard.writeText(`https://lw360-employee-enrollment.vercel.app/?token=${emp.portal_token}`)
+                          setCopiedId(emp.id)
+                          setTimeout(() => setCopiedId(null), 2000)
+                        }}
+                        style={{ fontSize: 11, padding: '2px 7px', borderRadius: 4, border: '1px solid #e2e8f0', background: copiedId === emp.id ? '#dcfce7' : '#f8fafc', color: copiedId === emp.id ? '#16a34a' : '#64748b', cursor: 'pointer' }}
+                      >{copiedId === emp.id ? 'Copied!' : '🔗 Link'}</button>
+                    )}
                   </div>
                 </div>
               )
@@ -1914,7 +1926,7 @@ function CampaignCreatorModal({ org: preSelectedOrg, orgs, onClose, inline }) {
             fit_savings: fitSavMonthly.toFixed(2),
             fica_savings: ficaSavMonthly.toFixed(2),
             ee_fee: Number(feePP).toFixed(2),
-            enrollment_link: `https://lw360-employee-enrollment.vercel.app/benefits?id=${optOutIds[emp.id] || ''}`,
+            enrollment_link: `https://lw360-employee-enrollment.vercel.app/?token=${emp.portal_token || ''}`,
             opt_out_link: `https://lw360-employee-enrollment.vercel.app/optout?id=${optOutIds[emp.id] || ''}`,
             days_remaining: 14,
             enrollment_deadline: endDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
