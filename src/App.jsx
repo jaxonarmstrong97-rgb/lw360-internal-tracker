@@ -171,7 +171,7 @@ const formatCurrency = (n) => n != null ? `$${Number(n).toLocaleString('en-US', 
 const generateOptOutId = () => {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
   let id = 'LW'
-  for (let i = 0; i < 4; i++) id += chars[Math.floor(Math.random() * chars.length)]
+  for (let i = 0; i < 6; i++) id += chars[Math.floor(Math.random() * chars.length)]
   return id
 }
 
@@ -808,6 +808,8 @@ function CensusUploadModal({ org, onClose }) {
     reader.onload = (e) => {
       const text = e.target.result
       const parsed = parseCSV(text)
+      parsed.fileName = file.name
+      parsed.fileSize = file.size
       setCsvData(parsed)
       // Auto-detect columns
       const autoMap = {}
@@ -886,19 +888,21 @@ function CensusUploadModal({ org, onClose }) {
       setImportProgress({ current: imported, total: employees.length })
     }
 
-    // Create census_uploads record
+    // Create census_uploads record (Bug #13)
     try {
       await fetch(`${SUPABASE_URL}/rest/v1/census_uploads`, {
         method: 'POST', headers,
         body: JSON.stringify({
           organization_id: org.id,
-          file_name: 'census-upload.csv',
+          file_name: csvData?.fileName || 'census-upload.csv',
+          file_size_bytes: csvData?.fileSize || null,
+          status: 'Processed',
+          employee_count_total: employees.length,
           column_mapping: columnMapping,
-          row_count: employees.length,
-          uploaded_at: new Date().toISOString()
+          processed_at: new Date().toISOString()
         })
       })
-    } catch (e) { /* census_uploads table may not exist yet */ }
+    } catch (e) { console.error('Census upload record error:', e) }
 
     // Update org stage
     await updateOrgStage(org.id, 'Census Received').catch(() => {})
@@ -1050,22 +1054,49 @@ function EligibilityModal({ org, onClose }) {
       calculated.push({ ...emp, eligibility: result })
       setProgress({ current: i + 1, total: emps.length })
 
-      // Update employee record in Supabase
+      // Update employee record in Supabase with ALL eligibility fields
+      const ppy = result.periods_per_year
+      const isTrs = orgSettings.is_trs_district
+      const currentSsAnnual = (!isTrs && result.annual_gross <= 176100) ? Math.min(result.annual_gross, 176100) * 0.062 : 0
+      const newSsAnnual = currentSsAnnual - result.ss_savings_annual
+      const currentMedicareAnnual = result.annual_gross * 0.0145
+      const newMedicareAnnual = currentMedicareAnnual - result.medicare_savings_annual
+      const grossPerPeriod = result.annual_gross / ppy
+      const currentPretaxPP = Number(emp.current_401k_per_period || 0) + Number(emp.current_health_insurance_per_period || 0) + Number(emp.current_hsa_per_period || 0) + Number(emp.current_other_pretax_per_period || 0)
+      const currentNetPP = grossPerPeriod - currentPretaxPP - (result.fit_before_annual / ppy) - (currentSsAnnual / ppy) - (currentMedicareAnnual / ppy)
+      const newNetPP = grossPerPeriod - currentPretaxPP - result.lw_premium_per_period - (result.fit_after_annual / ppy) - (newSsAnnual / ppy) - (newMedicareAnnual / ppy) + result.lw_reimbursement_per_period - result.fee_per_period
       try {
         await fetch(`${SUPABASE_URL}/rest/v1/employees?id=eq.${emp.id}`, {
           method: 'PATCH', headers,
           body: JSON.stringify({
             is_eligible: result.is_eligible,
             ineligible_reason: result.ineligible_reason,
-            net_benefit_monthly: result.net_benefit_monthly,
-            fit_savings_monthly: result.fit_savings_monthly,
-            fica_savings_monthly: (result.ss_savings_annual + result.medicare_savings_annual) / 12,
-            fee_monthly: result.fee_monthly,
-            in_straddle_zone: result.in_straddle_zone,
-            eligibility_run_at: new Date().toISOString()
+            eligibility_calculated_at: new Date().toISOString(),
+            gross_pay_per_period: Math.round(grossPerPeriod * 100) / 100,
+            taxable_income_per_period: Math.round((result.taxable_income_before / ppy) * 100) / 100,
+            new_taxable_income_per_period: Math.round((result.taxable_income_after / ppy) * 100) / 100,
+            current_fit_per_period: Math.round((result.fit_before_annual / ppy) * 100) / 100,
+            current_fit_rate: Math.round(result.effective_fit_rate * 10000) / 10000,
+            new_fit_per_period: Math.round((result.fit_after_annual / ppy) * 100) / 100,
+            current_ss_per_period: Math.round((currentSsAnnual / ppy) * 100) / 100,
+            new_ss_per_period: Math.round((newSsAnnual / ppy) * 100) / 100,
+            current_medicare_per_period: Math.round((currentMedicareAnnual / ppy) * 100) / 100,
+            new_medicare_per_period: Math.round((newMedicareAnnual / ppy) * 100) / 100,
+            fit_savings_per_period: Math.round(result.fit_savings_per_period * 100) / 100,
+            ss_savings_per_period: Math.round(result.ss_savings_per_period * 100) / 100,
+            medicare_savings_per_period: Math.round(result.medicare_savings_per_period * 100) / 100,
+            total_tax_savings_per_period: Math.round(result.total_tax_savings_per_period * 100) / 100,
+            lw_premium_per_period: Math.round(result.lw_premium_per_period * 100) / 100,
+            lw_fee_per_period: Math.round(result.fee_per_period * 100) / 100,
+            lw_reimbursement_per_period: Math.round(result.lw_reimbursement_per_period * 100) / 100,
+            net_benefit_per_period: Math.round(result.net_benefit_per_period * 100) / 100,
+            net_benefit_monthly: Math.round(result.net_benefit_monthly * 100) / 100,
+            net_benefit_annual: Math.round(result.net_benefit_annual * 100) / 100,
+            current_net_per_period: Math.round(currentNetPP * 100) / 100,
+            new_net_per_period: Math.round(newNetPP * 100) / 100,
           })
         })
-      } catch (e) { /* field may not exist */ }
+      } catch (e) { console.error('Eligibility save error:', e) }
     }
     setResults(calculated)
     setStep('results')
@@ -1134,6 +1165,9 @@ function EligibilityModal({ org, onClose }) {
       details: { eligible: eligible.length, total: results.length }
     })
     await createNotification({
+      recipient_id: '8fba22c5-1d5b-4549-8465-1f3627d616ea',
+      recipient_type: 'internal',
+      notification_type: 'analysis_approved',
       title: `Analysis approved for ${org.company_name}`,
       message: `${eligible.length} eligible employees ready for enrollment`,
       organization_id: org.id,
@@ -1689,15 +1723,24 @@ function CampaignCreatorModal({ org: preSelectedOrg, orgs, onClose, inline }) {
 
   const selectedOrg = orgs.find(o => o.id === selectedOrgId) || preSelectedOrg
 
-  // Gate 1: Load employees when org selected
+  // Gate 1: Load employees when org selected, generate & save opt_out_ids
   useEffect(() => {
     if (selectedOrgId) {
-      fetchEmployees(selectedOrgId).then(emps => {
+      fetchEmployees(selectedOrgId).then(async (emps) => {
         const eligible = emps.filter(e => e.is_eligible !== false)
         setEmployees(eligible)
         setSelectedEmps(new Set(eligible.map(e => e.id)))
         const ids = {}
-        eligible.forEach(e => { ids[e.id] = generateOptOutId() })
+        for (const e of eligible) {
+          const newId = e.opt_out_id || generateOptOutId()
+          ids[e.id] = newId
+          if (!e.opt_out_id) {
+            await fetch(`${SUPABASE_URL}/rest/v1/employees?id=eq.${e.id}`, {
+              method: 'PATCH', headers,
+              body: JSON.stringify({ opt_out_id: newId })
+            }).catch(err => console.error('Failed to save opt_out_id:', err))
+          }
+        }
         setOptOutIds(ids)
       })
     }
@@ -1721,11 +1764,12 @@ function CampaignCreatorModal({ org: preSelectedOrg, orgs, onClose, inline }) {
     const endDate = new Date(today); endDate.setDate(endDate.getDate() + 14)
     const body = {
       organization_id: selectedOrgId,
-      campaign_name: `Enrollment — ${selectedOrg?.company_name || 'Org'} — ${today.toISOString().slice(0, 10)}`,
+      name: `Enrollment — ${selectedOrg?.company_name || 'Org'} — ${today.toISOString().slice(0, 10)}`,
       status: 'Draft',
       start_date: today.toISOString().slice(0, 10),
       end_date: endDate.toISOString().slice(0, 10),
       total_employees: selectedEmployees.length,
+      eligible_employees: selectedEmployees.length,
     }
     const res = await fetch(`${SUPABASE_URL}/rest/v1/enrollment_campaigns`, {
       method: 'POST', headers: headersRepr, body: JSON.stringify(body)
@@ -1740,6 +1784,14 @@ function CampaignCreatorModal({ org: preSelectedOrg, orgs, onClose, inline }) {
         organization_id: selectedOrgId,
         campaign_id: id,
         details: { employees: selectedEmployees.length }
+      })
+      await createNotification({
+        recipient_id: '8fba22c5-1d5b-4549-8465-1f3627d616ea',
+        recipient_type: 'internal',
+        notification_type: 'campaign_created',
+        title: `Campaign created for ${selectedOrg?.company_name}`,
+        message: `${selectedEmployees.length} eligible employees included. Campaign ID: ${id}`,
+        organization_id: selectedOrgId,
       })
     }
     setGate(2)
@@ -1789,10 +1841,14 @@ function CampaignCreatorModal({ org: preSelectedOrg, orgs, onClose, inline }) {
       const batch = selectedEmployees.slice(i, i + 10)
       const promises = batch.map(async (emp) => {
         if (stopRef.current) return
-        const netPerCheck = emp.net_benefit_monthly || 0
-        const fitSav = emp.fit_savings_monthly || 0
-        const ficaSav = emp.fica_savings_monthly || 0
-        const feePP = emp.fee_monthly || 0
+        const periods = { Weekly: 52, Biweekly: 26, 'Semi-Monthly': 24, Monthly: 12 }
+        const ppy = periods[freq] || 24
+        const netPerCheck = emp.net_benefit_per_period || emp.net_benefit_monthly || 0
+        const fitSavMonthly = (emp.fit_savings_per_period || 0) * ppy / 12
+        const ssSavMonthly = (emp.ss_savings_per_period || 0) * ppy / 12
+        const medicareSavMonthly = (emp.medicare_savings_per_period || 0) * ppy / 12
+        const ficaSavMonthly = ssSavMonthly + medicareSavMonthly
+        const feePP = emp.lw_fee_per_period || 0
         const body = {
           to: TEST_EMAIL_RECIPIENT,  // HARDCODED — always test
           to_name: `${emp.first_name || ''} ${emp.last_name || ''}`.trim(),
@@ -1802,12 +1858,12 @@ function CampaignCreatorModal({ org: preSelectedOrg, orgs, onClose, inline }) {
             employee_name: `${emp.first_name || ''} ${emp.last_name || ''}`.trim(),
             company_name: selectedOrg?.company_name || '',
             pay_frequency: freq,
-            net_increase_per_check: netPerCheck.toFixed(2),
-            fit_savings: fitSav.toFixed(2),
-            fica_savings: ficaSav.toFixed(2),
-            ee_fee_per_check: feePP.toFixed(2),
-            enrollment_link: `https://enroll.livewellhealth360.com/benefits?id=${optOutIds[emp.id] || ''}`,
-            opt_out_link: `https://enroll.livewellhealth360.com/optout?id=${optOutIds[emp.id] || ''}`,
+            net_increase_per_check: Number(netPerCheck).toFixed(2),
+            fit_savings: fitSavMonthly.toFixed(2),
+            fica_savings: ficaSavMonthly.toFixed(2),
+            ee_fee_per_check: Number(feePP).toFixed(2),
+            enrollment_link: `https://lw360-employee-enrollment.vercel.app/benefits?id=${optOutIds[emp.id] || ''}`,
+            opt_out_link: `https://lw360-employee-enrollment.vercel.app/optout?id=${optOutIds[emp.id] || ''}`,
             days_remaining: 14,
             enrollment_deadline: endDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
             original_recipient_name: `${emp.first_name || ''} ${emp.last_name || ''}`.trim(),
@@ -1844,8 +1900,17 @@ function CampaignCreatorModal({ org: preSelectedOrg, orgs, onClose, inline }) {
     }
 
     if (campaignId) {
+      const sentCount = stopRef.current ? sendProgress.current : total
       await fetch(`${SUPABASE_URL}/rest/v1/enrollment_campaigns?id=eq.${campaignId}`, {
-        method: 'PATCH', headers, body: JSON.stringify({ status: 'In Progress', total_emails_sent: stopRef.current ? sendProgress.current : total })
+        method: 'PATCH', headers, body: JSON.stringify({ status: 'In Progress', emails_sent: sentCount })
+      })
+      await createNotification({
+        recipient_id: '8fba22c5-1d5b-4549-8465-1f3627d616ea',
+        recipient_type: 'internal',
+        notification_type: 'emails_sent',
+        title: `Emails sent for ${selectedOrg?.company_name}`,
+        message: `${sentCount} enrollment emails sent successfully.`,
+        organization_id: selectedOrgId,
       })
     }
     setCampaignStatus('In Progress')
@@ -1861,6 +1926,9 @@ function CampaignCreatorModal({ org: preSelectedOrg, orgs, onClose, inline }) {
     // Same send flow but only for non-viewed, non-opted-out employees
     const reminderEmps = selectedEmployees.filter(e => e.enrollment_status !== 'Opted Out' && !e.enrollment_page_viewed_at)
     await createNotification({
+      recipient_id: '8fba22c5-1d5b-4549-8465-1f3627d616ea',
+      recipient_type: 'internal',
+      notification_type: 'reminder_ready',
       title: `Reminder ready for ${selectedOrg?.company_name}`,
       message: `${reminderEmps.length} employees haven't responded`,
       organization_id: selectedOrgId,
@@ -1878,9 +1946,11 @@ function CampaignCreatorModal({ org: preSelectedOrg, orgs, onClose, inline }) {
 
   const buildEmailPreview = (emp) => {
     const freq = selectedOrg?.pay_frequency || 'Semi-Monthly'
-    const netPerCheck = emp.net_benefit_monthly || 0
-    const fitSav = emp.fit_savings_monthly || 0
-    const ficaSav = emp.fica_savings_monthly || 0
+    const periods = { Weekly: 52, Biweekly: 26, 'Semi-Monthly': 24, Monthly: 12 }
+    const ppy = periods[freq] || 24
+    const netPerCheck = emp.net_benefit_per_period || emp.net_benefit_monthly || 0
+    const fitSav = (emp.fit_savings_per_period || 0) * ppy / 12
+    const ficaSav = ((emp.ss_savings_per_period || 0) + (emp.medicare_savings_per_period || 0)) * ppy / 12
     const endDate = new Date(); endDate.setDate(endDate.getDate() + 14)
     return `
       <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden">
