@@ -1506,6 +1506,12 @@ function CampaignDetail({ campaign: initialCampaign, orgs, onBack, onRefresh }) 
   const emailSentEmps = employees.filter(e => e.enrollment_status === 'Email Sent')
   const neverViewedEmps = employees.filter(e => e.enrollment_status === 'Email Sent' && !e.enrollment_page_viewed_at)
   const viewedEmps = employees.filter(e => e.enrollment_page_viewed_at && e.enrollment_status !== 'Opted Out')
+  const openedEmps = employees.filter(e => e.email_opened_at)
+  const clickedEmps = employees.filter(e => e.email_clicked_at)
+  const acknowledgedEmps = employees.filter(e => e.email_acknowledged_at)
+  const totalSent = employees.filter(e => e.enrollment_email_sent_at).length
+  const openRate = totalSent > 0 ? ((openedEmps.length / totalSent) * 100).toFixed(1) : '0.0'
+  const clickRate = totalSent > 0 ? ((clickedEmps.length / totalSent) * 100).toFixed(1) : '0.0'
 
   const handleFinalize = async () => {
     if (confirmText !== 'CONFIRM ENROLLMENT') return
@@ -1604,23 +1610,46 @@ function CampaignDetail({ campaign: initialCampaign, orgs, onBack, onRefresh }) 
           </span>
         </div>
 
-        {/* Stats */}
-        <div style={{ display: 'flex', gap: 16, marginTop: 20 }}>
-          <div style={{ flex: 1, padding: 12, background: '#f0fdf4', borderRadius: 8, textAlign: 'center' }}>
-            <div style={{ fontSize: 24, fontWeight: 700, color: '#16a34a' }}>{enrolledEmps.length}</div>
-            <div style={{ fontSize: 11, color: '#64748b' }}>Enrolled</div>
+        {/* Enrollment Stats */}
+        <div style={{ display: 'flex', gap: 10, marginTop: 20, flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 80, padding: 12, background: '#f0f9ff', borderRadius: 8, textAlign: 'center' }}>
+            <div style={{ fontSize: 22, fontWeight: 700, color: '#29ABE2' }}>{totalSent}</div>
+            <div style={{ fontSize: 10, color: '#64748b' }}>Sent</div>
           </div>
-          <div style={{ flex: 1, padding: 12, background: '#fef3c7', borderRadius: 8, textAlign: 'center' }}>
-            <div style={{ fontSize: 24, fontWeight: 700, color: '#d97706' }}>{neverViewedEmps.length}</div>
-            <div style={{ fontSize: 11, color: '#64748b' }}>Never Viewed</div>
+          <div style={{ flex: 1, minWidth: 80, padding: 12, background: '#eff6ff', borderRadius: 8, textAlign: 'center' }}>
+            <div style={{ fontSize: 22, fontWeight: 700, color: '#3b82f6' }}>{openedEmps.length}</div>
+            <div style={{ fontSize: 10, color: '#64748b' }}>Opened</div>
           </div>
-          <div style={{ flex: 1, padding: 12, background: '#fef2f2', borderRadius: 8, textAlign: 'center' }}>
-            <div style={{ fontSize: 24, fontWeight: 700, color: '#dc2626' }}>{optedOutEmps.length}</div>
-            <div style={{ fontSize: 11, color: '#64748b' }}>Opted Out</div>
+          <div style={{ flex: 1, minWidth: 80, padding: 12, background: '#f0fdf4', borderRadius: 8, textAlign: 'center' }}>
+            <div style={{ fontSize: 22, fontWeight: 700, color: '#16a34a' }}>{clickedEmps.length}</div>
+            <div style={{ fontSize: 10, color: '#64748b' }}>Clicked</div>
           </div>
-          <div style={{ flex: 1, padding: 12, background: '#f0f9ff', borderRadius: 8, textAlign: 'center' }}>
-            <div style={{ fontSize: 24, fontWeight: 700, color: '#29ABE2' }}>{emailSentEmps.length}</div>
-            <div style={{ fontSize: 11, color: '#64748b' }}>Emails Sent</div>
+          <div style={{ flex: 1, minWidth: 80, padding: 12, background: '#f0fdf4', borderRadius: 8, textAlign: 'center' }}>
+            <div style={{ fontSize: 22, fontWeight: 700, color: '#7AC143' }}>{acknowledgedEmps.length}</div>
+            <div style={{ fontSize: 10, color: '#64748b' }}>Acknowledged</div>
+          </div>
+          <div style={{ flex: 1, minWidth: 80, padding: 12, background: '#fef2f2', borderRadius: 8, textAlign: 'center' }}>
+            <div style={{ fontSize: 22, fontWeight: 700, color: '#dc2626' }}>{optedOutEmps.length}</div>
+            <div style={{ fontSize: 10, color: '#64748b' }}>Opted Out</div>
+          </div>
+          <div style={{ flex: 1, minWidth: 80, padding: 12, background: '#fef3c7', borderRadius: 8, textAlign: 'center' }}>
+            <div style={{ fontSize: 22, fontWeight: 700, color: '#d97706' }}>{neverViewedEmps.length}</div>
+            <div style={{ fontSize: 10, color: '#64748b' }}>Never Viewed</div>
+          </div>
+        </div>
+        {/* Email Rates */}
+        <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+          <div style={{ flex: 1, padding: '8px 12px', background: '#f8fafc', borderRadius: 6, textAlign: 'center', border: '1px solid #e2e8f0' }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#3b82f6' }}>{openRate}%</span>
+            <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: 4 }}>Open Rate</span>
+          </div>
+          <div style={{ flex: 1, padding: '8px 12px', background: '#f8fafc', borderRadius: 6, textAlign: 'center', border: '1px solid #e2e8f0' }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#16a34a' }}>{clickRate}%</span>
+            <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: 4 }}>Click Rate</span>
+          </div>
+          <div style={{ flex: 1, padding: '8px 12px', background: '#f8fafc', borderRadius: 6, textAlign: 'center', border: '1px solid #e2e8f0' }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#7AC143' }}>{enrolledEmps.length}</span>
+            <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: 4 }}>Enrolled</span>
           </div>
         </div>
       </div>
@@ -1646,7 +1675,14 @@ function CampaignDetail({ campaign: initialCampaign, orgs, onBack, onRefresh }) 
               return (
                 <div key={emp.id} style={{ padding: '8px 12px', borderLeft: `3px solid ${border}`, background: bg, marginBottom: 4, borderRadius: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13 }}>
                   <span style={{ color: '#1A395C', fontWeight: 500 }}>{emp.first_name} {emp.last_name}{emp.is_test && <TestBadge />}</span>
-                  <span style={{ fontSize: 11, color: '#64748b' }}>{emp.enrollment_status || 'Pending'}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {emp.email_acknowledged_at && <span title="Acknowledged" style={{ fontSize: 13 }}>✅</span>}
+                    {!emp.email_acknowledged_at && emp.email_clicked_at && <span title="Clicked" style={{ fontSize: 13 }}>🖱️</span>}
+                    {!emp.email_clicked_at && emp.email_opened_at && <span title="Opened" style={{ fontSize: 13 }}>👁️</span>}
+                    {!emp.email_opened_at && emp.enrollment_email_sent_at && <span title="Sent" style={{ fontSize: 13 }}>✉️</span>}
+                    {emp.enrollment_status === 'Opted Out' && <span title="Opted Out" style={{ fontSize: 13 }}>❌</span>}
+                    <span style={{ fontSize: 11, color: '#64748b' }}>{emp.enrollment_status || 'Pending'}</span>
+                  </div>
                 </div>
               )
             })}
@@ -1719,6 +1755,7 @@ function CampaignCreatorModal({ org: preSelectedOrg, orgs, onClose, inline }) {
   const [campaignStatus, setCampaignStatus] = useState('Draft')
   const [reminderGate, setReminderGate] = useState(false)
   const [reminderConfirmText, setReminderConfirmText] = useState('')
+  const [effectiveDate, setEffectiveDate] = useState('')
   const stopRef = useRef(false)
 
   const selectedOrg = orgs.find(o => o.id === selectedOrgId) || preSelectedOrg
@@ -1770,6 +1807,7 @@ function CampaignCreatorModal({ org: preSelectedOrg, orgs, onClose, inline }) {
       end_date: endDate.toISOString().slice(0, 10),
       total_employees: selectedEmployees.length,
       eligible_employees: selectedEmployees.length,
+      effective_date: effectiveDate || null,
     }
     const res = await fetch(`${SUPABASE_URL}/rest/v1/enrollment_campaigns`, {
       method: 'POST', headers: headersRepr, body: JSON.stringify(body)
@@ -1848,26 +1886,53 @@ function CampaignCreatorModal({ org: preSelectedOrg, orgs, onClose, inline }) {
         const ssSavMonthly = (emp.ss_savings_per_period || 0) * ppy / 12
         const medicareSavMonthly = (emp.medicare_savings_per_period || 0) * ppy / 12
         const ficaSavMonthly = ssSavMonthly + medicareSavMonthly
-        const feePP = emp.lw_fee_per_period || 0
+        const feePP = emp.lw_fee_per_period || (LW_EE_FEE[freq] || 44.87)
+        // Detailed paycheck data for email table
+        const lwPrem = LW_PREM[freq] || 1173
+        const grossPay = emp.gross_pay_per_period || 0
+        const pretaxDed = (Number(emp.current_401k_per_period)||0)+(Number(emp.current_health_insurance_per_period)||0)+(Number(emp.current_hsa_per_period)||0)+(Number(emp.current_other_pretax_per_period)||0)
+        const taxesBefore = (emp.current_fit_per_period||0)+(emp.current_ss_per_period||0)+(emp.current_medicare_per_period||0)
+        const taxesAfter = (emp.new_fit_per_period||emp.current_fit_per_period||0)+(emp.new_ss_per_period||emp.current_ss_per_period||0)+(emp.new_medicare_per_period||emp.current_medicare_per_period||0)
+        const takehomeBefore = grossPay - pretaxDed - taxesBefore
+        const takehomeAfter = grossPay - pretaxDed - lwPrem - taxesAfter - feePP + lwPrem
+        const taxSavings = taxesBefore - taxesAfter
+        const effDateFormatted = effectiveDate ? new Date(effectiveDate + 'T12:00:00').toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }) : ''
         const body = {
           to: TEST_EMAIL_RECIPIENT,  // HARDCODED — always test
           to_name: `${emp.first_name || ''} ${emp.last_name || ''}`.trim(),
           subject: `${TEST_SUBJECT_PREFIX}Your LW360 Enrollment — ${selectedOrg?.company_name || ''}`,
-          template: 'enrollment',
+          template: selectedOrg?.pay_type === 'trs' ? 'enrollment-trs' : 'enrollment',
           data: {
+            employee_id: emp.id,
+            campaign_id: campaignId,
             employee_name: `${emp.first_name || ''} ${emp.last_name || ''}`.trim(),
+            first_name: emp.first_name || '',
+            last_name: emp.last_name || '',
             company_name: selectedOrg?.company_name || '',
             pay_frequency: freq,
             net_increase_per_check: Number(netPerCheck).toFixed(2),
             fit_savings: fitSavMonthly.toFixed(2),
             fica_savings: ficaSavMonthly.toFixed(2),
-            ee_fee_per_check: Number(feePP).toFixed(2),
+            ee_fee: Number(feePP).toFixed(2),
             enrollment_link: `https://lw360-employee-enrollment.vercel.app/benefits?id=${optOutIds[emp.id] || ''}`,
             opt_out_link: `https://lw360-employee-enrollment.vercel.app/optout?id=${optOutIds[emp.id] || ''}`,
             days_remaining: 14,
             enrollment_deadline: endDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
-            original_recipient_name: `${emp.first_name || ''} ${emp.last_name || ''}`.trim(),
-            original_recipient_email: emp.email || '',
+            effective_date: effDateFormatted || '',
+            original_recipient: `${emp.first_name || ''} ${emp.last_name || ''} (${emp.email || 'no email'})`,
+            ...(grossPay > 0 ? {
+              gross_pay: grossPay,
+              pretax_deductions: pretaxDed,
+              lw_premium: lwPrem,
+              taxable_before: grossPay - pretaxDed,
+              taxable_after: grossPay - pretaxDed - lwPrem,
+              taxes_before: taxesBefore,
+              taxes_after: taxesAfter,
+              reimbursement: lwPrem,
+              takehome_before: takehomeBefore,
+              takehome_after: takehomeAfter,
+              tax_savings: taxSavings,
+            } : {}),
           }
         }
         try {
@@ -2041,8 +2106,19 @@ function CampaignCreatorModal({ org: preSelectedOrg, orgs, onClose, inline }) {
                     </label>
                   ))}
                 </div>
+                <div style={{ marginTop: 16, marginBottom: 4 }}>
+                  <label style={{ fontSize: 13, fontWeight: 600, color: '#1A395C', display: 'block', marginBottom: 6 }}>
+                    Effective Date (when benefits go live)
+                  </label>
+                  <input
+                    type="date"
+                    value={effectiveDate}
+                    onChange={e => setEffectiveDate(e.target.value)}
+                    style={{ padding: '8px 12px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 14, color: '#1A395C', width: 200 }}
+                  />
+                </div>
                 <button onClick={createCampaign} disabled={selectedEmps.size === 0}
-                  style={{ marginTop: 16, padding: '10px 24px', borderRadius: 6, border: 'none', background: selectedEmps.size > 0 ? '#7AC143' : '#e2e8f0', color: selectedEmps.size > 0 ? 'white' : '#94a3b8', fontSize: 14, fontWeight: 600, cursor: selectedEmps.size > 0 ? 'pointer' : 'not-allowed' }}>
+                  style={{ marginTop: 12, padding: '10px 24px', borderRadius: 6, border: 'none', background: selectedEmps.size > 0 ? '#7AC143' : '#e2e8f0', color: selectedEmps.size > 0 ? 'white' : '#94a3b8', fontSize: 14, fontWeight: 600, cursor: selectedEmps.size > 0 ? 'pointer' : 'not-allowed' }}>
                   Create Campaign ({selectedEmps.size} employees)
                 </button>
               </div>
