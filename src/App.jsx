@@ -1,5 +1,38 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useRef, createContext, useContext } from 'react'
 import { calculateEligibility, runValidationTests } from './utils/eligibility.js'
+
+// ─── Toast Notification System ─────────────────────────────────────────────
+const ToastContext = createContext()
+
+function ToastProvider({ children }) {
+  const [toasts, setToasts] = useState([])
+  const addToast = useCallback((message, type = 'info') => {
+    const id = Date.now() + Math.random()
+    setToasts(prev => [...prev, { id, message, type }])
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000)
+  }, [])
+  return (
+    <ToastContext.Provider value={addToast}>
+      {children}
+      <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 9999, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {toasts.map(t => (
+          <div key={t.id} style={{
+            padding: '12px 20px', borderRadius: 8, fontSize: 13, fontWeight: 500, maxWidth: 380,
+            boxShadow: '0 4px 16px rgba(0,0,0,0.15)', animation: 'fadeIn 0.2s ease',
+            background: t.type === 'success' ? '#f0fdf4' : t.type === 'error' ? '#fef2f2' : t.type === 'warning' ? '#fef3c7' : '#f0f9ff',
+            color: t.type === 'success' ? '#166534' : t.type === 'error' ? '#991b1b' : t.type === 'warning' ? '#92400e' : '#1e40af',
+            border: `1px solid ${t.type === 'success' ? '#86efac' : t.type === 'error' ? '#fca5a5' : t.type === 'warning' ? '#fcd34d' : '#93c5fd'}`,
+          }}>
+            {t.message}
+          </div>
+        ))}
+      </div>
+      <style>{`@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }`}</style>
+    </ToastContext.Provider>
+  )
+}
+
+function useToast() { return useContext(ToastContext) }
 
 // ─── Supabase Config ────────────────────────────────────────────────────────
 const SUPABASE_URL = 'https://aejnfgtttbenrnlmrsam.supabase.co'
@@ -44,7 +77,7 @@ const STAGE_COLORS = {
 
 // ─── Payroll Constants ──────────────────────────────────────────────────────
 const LW_PREM = { 'Weekly': 270.69, 'Biweekly': 541.38, 'Semi-Monthly': 586.50, 'Monthly': 1173.00 }
-const LW_EE_FEE = { 'Weekly': 20.68, 'Biweekly': 41.42, 'Semi-Monthly': 44.87, 'Monthly': 89.73 }
+const LW_EE_FEE = { 'Weekly': 20.71, 'Biweekly': 41.42, 'Semi-Monthly': 44.87, 'Monthly': 89.73 }
 
 const CAMPAIGN_STATUSES = ['Draft', 'Previewed', 'Approved', 'Sending', 'In Progress', 'Pending Finalization', 'Completed']
 const CAMPAIGN_STATUS_COLORS = {
@@ -171,7 +204,8 @@ const formatCurrency = (n) => n != null ? `$${Number(n).toLocaleString('en-US', 
 const generateOptOutId = () => {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
   let id = 'LW'
-  for (let i = 0; i < 6; i++) id += chars[Math.floor(Math.random() * chars.length)]
+  const randomBytes = crypto.getRandomValues(new Uint8Array(6))
+  for (let i = 0; i < 6; i++) id += chars[randomBytes[i] % chars.length]
   return id
 }
 
@@ -227,6 +261,7 @@ function TestBadge() {
 // MAIN APP
 // ═══════════════════════════════════════════════════════════════════════════
 export default function App() {
+  const showToast = useToast()
   const [tab, setTab] = useState('pipeline')
   const [orgs, setOrgs] = useState([])
   const [brokers, setBrokers] = useState([])
@@ -262,7 +297,7 @@ export default function App() {
       setOrgs(prev => prev.map(o => o.id === orgId ? { ...o, pipeline_stage: newStage, stage_changed_at: new Date().toISOString() } : o))
       if (selectedOrg?.id === orgId) setSelectedOrg(prev => ({ ...prev, pipeline_stage: newStage, stage_changed_at: new Date().toISOString() }))
       await createAuditEntry({ action: `Pipeline stage changed to "${newStage}"`, action_category: 'pipeline', organization_id: orgId, details: { new_stage: newStage } })
-    } catch (e) { alert('Failed to update stage: ' + e.message) }
+    } catch (e) { showToast?.('Failed to update stage: ' + e.message, 'error') }
   }
 
   // Stats
@@ -505,6 +540,8 @@ function PipelineCard({ org, onSelect, setDragOrgId }) {
 function OrganizationsTable({ orgs, allOrgs, search, setSearch, stageFilter, setStageFilter, onSelect, onStageChange }) {
   const [sortField, setSortField] = useState('created_at')
   const [sortDir, setSortDir] = useState('desc')
+  const [page, setPage] = useState(0)
+  const pageSize = 25
 
   const sorted = [...orgs].sort((a, b) => {
     let va = a[sortField], vb = b[sortField]
@@ -553,7 +590,7 @@ function OrganizationsTable({ orgs, allOrgs, search, setSearch, stageFilter, set
             </tr>
           </thead>
           <tbody>
-            {sorted.map(org => (
+            {sorted.slice(page * pageSize, (page + 1) * pageSize).map(org => (
               <tr key={org.id} style={{ borderBottom: '1px solid #f1f5f9' }}
                 onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
@@ -586,7 +623,20 @@ function OrganizationsTable({ orgs, allOrgs, search, setSearch, stageFilter, set
         </table>
         {sorted.length === 0 && <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8', fontSize: 14 }}>No organizations found</div>}
       </div>
-      <div style={{ marginTop: 12, fontSize: 12, color: '#94a3b8' }}>Showing {sorted.length} of {allOrgs.length} organizations</div>
+      <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ fontSize: 12, color: '#94a3b8' }}>
+          Showing {Math.min(page * pageSize + 1, sorted.length)}–{Math.min((page + 1) * pageSize, sorted.length)} of {sorted.length} {sorted.length !== allOrgs.length ? `(filtered from ${allOrgs.length})` : ''}
+        </div>
+        {sorted.length > pageSize && (
+          <div style={{ display: 'flex', gap: 4 }}>
+            <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
+              style={{ padding: '4px 10px', borderRadius: 4, border: '1px solid #e2e8f0', background: 'white', cursor: page === 0 ? 'not-allowed' : 'pointer', color: page === 0 ? '#94a3b8' : '#1A395C', fontSize: 12 }}>Prev</button>
+            <span style={{ padding: '4px 8px', fontSize: 12, color: '#64748b' }}>Page {page + 1} of {Math.ceil(sorted.length / pageSize)}</span>
+            <button onClick={() => setPage(p => Math.min(Math.ceil(sorted.length / pageSize) - 1, p + 1))} disabled={(page + 1) * pageSize >= sorted.length}
+              style={{ padding: '4px 10px', borderRadius: 4, border: '1px solid #e2e8f0', background: 'white', cursor: (page + 1) * pageSize >= sorted.length ? 'not-allowed' : 'pointer', color: (page + 1) * pageSize >= sorted.length ? '#94a3b8' : '#1A395C', fontSize: 12 }}>Next</button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -595,6 +645,7 @@ function OrganizationsTable({ orgs, allOrgs, search, setSearch, stageFilter, set
 // DETAIL SIDEBAR (Enhanced)
 // ═══════════════════════════════════════════════════════════════════════════
 function DetailSidebar({ org, brokers, campaigns, onClose, onStageChange, onUpdate, onRefresh, orgs }) {
+  const showToast = useToast()
   const [notes, setNotes] = useState(org.notes || '')
   const [auditLog, setAuditLog] = useState([])
   const [saving, setSaving] = useState(false)
@@ -610,7 +661,7 @@ function DetailSidebar({ org, brokers, campaigns, onClose, onStageChange, onUpda
 
   const saveNotes = async () => {
     setSaving(true)
-    try { await onUpdate(org.id, { notes }) } catch (e) { alert('Failed to save: ' + e.message) }
+    try { await onUpdate(org.id, { notes }); showToast('Notes saved', 'success') } catch (e) { showToast('Failed to save: ' + e.message, 'error') }
     setSaving(false)
   }
 
@@ -774,8 +825,13 @@ function Field({ label, value, link }) {
 // MODAL WRAPPER
 // ═══════════════════════════════════════════════════════════════════════════
 function Modal({ title, onClose, width, children }) {
+  useEffect(() => {
+    const handleKey = (e) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', handleKey)
+    return () => document.removeEventListener('keydown', handleKey)
+  }, [onClose])
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}
+    <div role="dialog" aria-modal="true" aria-label={title} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}>
       <div style={{ background: 'white', borderRadius: 12, width: width || 700, maxWidth: '95vw', maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
         <div style={{ padding: '16px 24px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
@@ -842,7 +898,7 @@ function CensusUploadModal({ org, onClose }) {
     e.preventDefault()
     const file = e.dataTransfer.files[0]
     if (file && (file.name.endsWith('.csv') || file.name.endsWith('.CSV'))) handleFile(file)
-    else alert('Please upload a CSV file')
+    else { /* invalid file type — ignored */ }
   }
 
   const runImport = async () => {
@@ -905,7 +961,7 @@ function CensusUploadModal({ org, onClose }) {
     } catch (e) { console.error('Census upload record error:', e) }
 
     // Update org stage
-    await updateOrgStage(org.id, 'Census Received').catch(() => {})
+    await updateOrgStage(org.id, 'Eligibility Analysis').catch(() => {})
     await createAuditEntry({
       action: `Census uploaded: ${employees.length} employees imported`,
       action_category: 'census',
@@ -1018,6 +1074,7 @@ function CensusUploadModal({ org, onClose }) {
 // ELIGIBILITY MODAL
 // ═══════════════════════════════════════════════════════════════════════════
 function EligibilityModal({ org, onClose }) {
+  const showToast = useToast()
   const [step, setStep] = useState('running') // running | results
   const [employees, setEmployees] = useState([])
   const [results, setResults] = useState([])
@@ -1027,7 +1084,7 @@ function EligibilityModal({ org, onClose }) {
 
   useEffect(() => {
     runEligibility()
-  }, [])
+  }, [org.id])
 
   const runEligibility = async () => {
     const emps = await fetchEmployees(org.id)
@@ -1102,7 +1159,7 @@ function EligibilityModal({ org, onClose }) {
     setStep('results')
 
     // Update org stage
-    await updateOrgStage(org.id, 'Analysis Ready').catch(() => {})
+    await updateOrgStage(org.id, 'Employer Review').catch(() => {})
     await createAuditEntry({
       action: `Eligibility analysis completed: ${calculated.filter(c => c.eligibility.is_eligible).length} eligible of ${calculated.length}`,
       action_category: 'eligibility',
@@ -1172,7 +1229,7 @@ function EligibilityModal({ org, onClose }) {
       message: `${eligible.length} eligible employees ready for enrollment`,
       organization_id: org.id,
     })
-    alert('Analysis approved. Results are now available for campaigns.')
+    showToast('Analysis approved. Results are now available for campaigns.', 'success')
   }
 
   return (
@@ -1307,6 +1364,23 @@ function EmployeeListModal({ org, onClose }) {
     else { setSortField(field); setSortDir('asc') }
   }
 
+  const exportEmployeeRoster = () => {
+    const cols = ['Name', 'Email', 'Salary', 'Filing Status', 'FIT Savings/pp', 'FICA Savings/pp', 'Net Benefit/pp', 'Enrollment Status', 'Fee Per Period']
+    const rows = employees.map(e => [
+      `${e.first_name || ''} ${e.last_name || ''}`.trim(),
+      e.email || '',
+      e.annual_salary || '',
+      e.filing_status || '',
+      (e.fit_savings_per_period || 0).toFixed(2),
+      ((e.ss_savings_per_period || 0) + (e.medicare_savings_per_period || 0)).toFixed(2),
+      (e.net_benefit_per_period || 0).toFixed(2),
+      e.enrollment_status || 'None',
+      (e.lw_fee_per_period || 0).toFixed(2),
+    ])
+    const csv = [cols.join(','), ...rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))].join('\n')
+    downloadBlob(csv, `employee-roster-${org.company_name}-${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv')
+  }
+
   const startEdit = (emp) => {
     setEditingId(emp.id)
     setEditData({ first_name: emp.first_name || '', last_name: emp.last_name || '', email: emp.email || '', annual_salary: emp.annual_salary || '', filing_status: emp.filing_status || 'Single' })
@@ -1330,6 +1404,9 @@ function EmployeeListModal({ org, onClose }) {
             <input type="text" placeholder="Filter employees..." value={filter} onChange={e => setFilter(e.target.value)}
               style={{ padding: '8px 14px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 13, flex: 1 }} />
             <span style={{ fontSize: 12, color: '#94a3b8' }}>{filtered.length} of {employees.length}</span>
+            <button onClick={exportEmployeeRoster} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#1A395C', color: 'white', fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              Export CSV
+            </button>
           </div>
           <div style={{ overflowX: 'auto', border: '1px solid #e2e8f0', borderRadius: 8 }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
@@ -1476,6 +1553,7 @@ function CampaignsList({ campaigns, onSelect }) {
 // CAMPAIGN DETAIL (Management / Finalization)
 // ═══════════════════════════════════════════════════════════════════════════
 function CampaignDetail({ campaign: initialCampaign, orgs, onBack, onRefresh }) {
+  const showToast = useToast()
   const [campaign, setCampaign] = useState(initialCampaign)
   const [employees, setEmployees] = useState([])
   const [loading, setLoading] = useState(true)
@@ -1500,7 +1578,7 @@ function CampaignDetail({ campaign: initialCampaign, orgs, onBack, onRefresh }) 
         method: 'PATCH', headers, body: JSON.stringify({ status: 'Pending Finalization' })
       }).then(() => setCampaign(prev => ({ ...prev, status: 'Pending Finalization' })))
     }
-  }, [isPendingFinalization])
+  }, [isPendingFinalization, campaign.status, campaign.id])
 
   const enrolledEmps = employees.filter(e => e.enrollment_status === 'Enrolled')
   const optedOutEmps = employees.filter(e => e.enrollment_status === 'Opted Out')
@@ -1538,7 +1616,7 @@ function CampaignDetail({ campaign: initialCampaign, orgs, onBack, onRefresh }) 
     setShowFinalize(false)
     setConfirmText('')
     onRefresh()
-    alert(`Enrollment finalized. ${toEnroll.length} employees enrolled.`)
+    showToast(`Enrollment finalized. ${toEnroll.length} employees enrolled.`, 'success')
   }
 
   const generatePayrollPacket = () => {
@@ -1751,6 +1829,7 @@ function CampaignDetail({ campaign: initialCampaign, orgs, onBack, onRefresh }) 
 // CAMPAIGN CREATOR (5 Permission Gates)
 // ═══════════════════════════════════════════════════════════════════════════
 function CampaignCreatorModal({ org: preSelectedOrg, orgs, onClose, inline }) {
+  const showToast = useToast()
   const [gate, setGate] = useState(1)
   const [selectedOrgId, setSelectedOrgId] = useState(preSelectedOrg?.id || '')
   const [campaignId, setCampaignId] = useState(null)
@@ -1808,12 +1887,12 @@ function CampaignCreatorModal({ org: preSelectedOrg, orgs, onClose, inline }) {
 
   // Gate 1: Create campaign
   const createCampaign = async () => {
-    if (!selectedOrgId) { alert('Select an organization'); return }
+    if (!selectedOrgId) { showToast('Select an organization', 'warning'); return }
     const today = new Date()
     const endDate = new Date(today); endDate.setDate(endDate.getDate() + 14)
     const body = {
       organization_id: selectedOrgId,
-      name: `Enrollment — ${selectedOrg?.company_name || 'Org'} — ${today.toISOString().slice(0, 10)}`,
+      campaign_name: `Enrollment — ${selectedOrg?.company_name || 'Org'} — ${today.toISOString().slice(0, 10)}`,
       status: 'Draft',
       start_date: today.toISOString().slice(0, 10),
       end_date: endDate.toISOString().slice(0, 10),
@@ -1950,7 +2029,7 @@ function CampaignCreatorModal({ org: preSelectedOrg, orgs, onClose, inline }) {
         try {
           await fetch(`${SUPABASE_URL}/functions/v1/send-enrollment-email`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
             body: JSON.stringify(body)
           })
           // Update employee
@@ -2016,7 +2095,7 @@ function CampaignCreatorModal({ org: preSelectedOrg, orgs, onClose, inline }) {
       organization_id: selectedOrgId,
       campaign_id: campaignId,
     })
-    alert(`Reminder notification created for ${reminderEmps.length} employees.`)
+    showToast(`Reminder notification created for ${reminderEmps.length} employees.`, 'success')
     setReminderGate(false)
     setReminderConfirmText('')
   }
@@ -2129,6 +2208,9 @@ function CampaignCreatorModal({ org: preSelectedOrg, orgs, onClose, inline }) {
                     style={{ padding: '8px 12px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 14, color: '#1A395C', width: 200 }}
                   />
                 </div>
+                <div style={{ padding: 12, background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 8, marginTop: 12, fontSize: 12, color: '#9a3412' }}>
+                  <strong>SendGrid Free Tier:</strong> 100 emails/day limit. Upgrade required for production use.
+                </div>
                 <button onClick={createCampaign} disabled={selectedEmps.size === 0}
                   style={{ marginTop: 12, padding: '10px 24px', borderRadius: 6, border: 'none', background: selectedEmps.size > 0 ? '#7AC143' : '#e2e8f0', color: selectedEmps.size > 0 ? 'white' : '#94a3b8', fontSize: 14, fontWeight: 600, cursor: selectedEmps.size > 0 ? 'pointer' : 'not-allowed' }}>
                   Create Campaign ({selectedEmps.size} employees)
@@ -2166,7 +2248,12 @@ function CampaignCreatorModal({ org: preSelectedOrg, orgs, onClose, inline }) {
             {/* Email Preview Modal */}
             {previewIdx !== null && selectedEmployees[previewIdx] && (
               <Modal title={`Email Preview — ${selectedEmployees[previewIdx].first_name} ${selectedEmployees[previewIdx].last_name}`} onClose={() => setPreviewIdx(null)} width={650}>
-                <div dangerouslySetInnerHTML={{ __html: buildEmailPreview(selectedEmployees[previewIdx]) }} />
+                <iframe
+                  srcDoc={buildEmailPreview(selectedEmployees[previewIdx])}
+                  sandbox=""
+                  style={{ width: '100%', minHeight: 500, border: 'none' }}
+                  title="Email Preview"
+                />
               </Modal>
             )}
 
@@ -2301,9 +2388,31 @@ function CampaignCreatorModal({ org: preSelectedOrg, orgs, onClose, inline }) {
 function BrokersView({ brokers, orgs, commissions }) {
   const [selectedBroker, setSelectedBroker] = useState(null)
 
+  const exportBrokerCommissions = () => {
+    const cols = ['Broker', 'Agency', 'Organization', 'Commission Amount', 'Commission Rate', 'Status', 'Date']
+    const rows = commissions.map(c => [
+      c.brokers?.name || '',
+      brokers.find(b => b.id === c.broker_id)?.agency_name || '',
+      c.organizations?.company_name || '',
+      (c.amount || 0).toFixed(2),
+      c.rate || '',
+      c.status || '',
+      c.created_at ? new Date(c.created_at).toISOString().slice(0, 10) : '',
+    ])
+    const csv = [cols.join(','), ...rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))].join('\n')
+    downloadBlob(csv, `broker-commissions-${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv')
+  }
+
   return (
     <div style={{ padding: 24 }}>
-      <h2 style={{ fontSize: 20, fontWeight: 700, color: '#1A395C', marginBottom: 16 }}>Broker Network</h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <h2 style={{ fontSize: 20, fontWeight: 700, color: '#1A395C' }}>Broker Network</h2>
+        {commissions.length > 0 && (
+          <button onClick={exportBrokerCommissions} style={{ padding: '8px 16px', borderRadius: 6, border: 'none', background: '#1A395C', color: 'white', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+            Export Commissions CSV
+          </button>
+        )}
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16 }}>
         {brokers.map(b => {
           const brokerOrgs = orgs.filter(o => o.broker_id === b.id)
@@ -2498,5 +2607,14 @@ function ReportsView({ orgs, campaigns, brokers, commissions }) {
         <div>6609 Toledo Avenue Ste. 1, Lubbock, TX | (806) 799-1099 | livewellhealth360.com</div>
       </div>
     </div>
+  )
+}
+
+// ─── App with Providers (wrapped export) ────────────────────────────────────
+export function AppWithProviders() {
+  return (
+    <ToastProvider>
+      <App />
+    </ToastProvider>
   )
 }
