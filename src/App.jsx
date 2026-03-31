@@ -178,7 +178,7 @@ const createAuditEntry = async (entry) => {
       method: 'POST', headers,
       body: JSON.stringify({ ...entry, created_at: new Date().toISOString() })
     })
-  } catch (e) { console.error('Audit log error:', e) }
+  } catch { /* audit log is non-critical */ }
 }
 
 const createNotification = async (notification) => {
@@ -187,7 +187,7 @@ const createNotification = async (notification) => {
       method: 'POST', headers,
       body: JSON.stringify({ ...notification, is_read: false, created_at: new Date().toISOString() })
     })
-  } catch (e) { console.error('Notification error:', e) }
+  } catch { /* notification is non-critical */ }
 }
 
 const markNotificationRead = async (id) => {
@@ -257,11 +257,99 @@ function TestBadge() {
   )
 }
 
+// ─── Authentication ──────────────────────────────────────────────────────────
+const SESSION_KEY = 'lw360_internal_session'
+const SESSION_DURATION_MS = 24 * 60 * 60 * 1000 // 24 hours
+
+async function hashPassword(password) {
+  const data = new TextEncoder().encode(password)
+  const hash = await crypto.subtle.digest('SHA-256', data)
+  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+function getSession() {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY)
+    if (!raw) return null
+    const session = JSON.parse(raw)
+    if (Date.now() > session.expiresAt) { localStorage.removeItem(SESSION_KEY); return null }
+    return session
+  } catch { return null }
+}
+
+function saveSession(user) {
+  localStorage.setItem(SESSION_KEY, JSON.stringify({
+    id: user.id, name: user.name, email: user.email,
+    expiresAt: Date.now() + SESSION_DURATION_MS
+  }))
+}
+
+function clearSession() { localStorage.removeItem(SESSION_KEY) }
+
+function LoginScreen({ onLogin }) {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setError('')
+    setLoading(true)
+    try {
+      const hash = await hashPassword(password)
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/verify_internal_user`, {
+        method: 'POST',
+        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
+        body: JSON.stringify({ p_email: email.trim().toLowerCase(), p_password_hash: hash })
+      })
+      const data = await res.json()
+      const user = Array.isArray(data) ? data[0] : data
+      if (!res.ok || !user || !user.id) { setError('Invalid email or password.'); setLoading(false); return }
+      saveSession(user)
+      onLogin(user)
+    } catch { setError('Login failed. Please try again.') }
+    setLoading(false)
+  }
+
+  return (
+    <div style={{ minHeight: '100vh', background: '#F5F7FA', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ background: 'white', borderRadius: 12, padding: 40, width: 380, boxShadow: '0 4px 24px rgba(0,0,0,0.1)' }}>
+        <div style={{ textAlign: 'center', marginBottom: 32 }}>
+          <div style={{ width: 52, height: 52, borderRadius: 12, background: '#7AC143', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 18, color: 'white', margin: '0 auto 16px' }}>LW</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: '#1A395C' }}>Live Well 360</div>
+          <div style={{ fontSize: 13, color: '#64748b', marginTop: 4 }}>Internal Tracker</div>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#64748b', marginBottom: 6 }}>Email</label>
+            <input type="email" value={email} onChange={e => setEmail(e.target.value)} required autoFocus
+              style={{ width: '100%', padding: '10px 14px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 14, boxSizing: 'border-box', outline: 'none' }}
+              placeholder="you@livewellhsa.com" />
+          </div>
+          <div style={{ marginBottom: 24 }}>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#64748b', marginBottom: 6 }}>Password</label>
+            <input type="password" value={password} onChange={e => setPassword(e.target.value)} required
+              style={{ width: '100%', padding: '10px 14px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 14, boxSizing: 'border-box', outline: 'none' }}
+              placeholder="••••••••" />
+          </div>
+          {error && <div style={{ marginBottom: 16, padding: '10px 14px', background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 6, color: '#dc2626', fontSize: 13 }}>{error}</div>}
+          <button type="submit" disabled={loading}
+            style={{ width: '100%', padding: 12, borderRadius: 6, border: 'none', background: loading ? '#e2e8f0' : '#1A395C', color: loading ? '#94a3b8' : 'white', fontSize: 14, fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer' }}>
+            {loading ? 'Signing in...' : 'Sign In'}
+          </button>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // MAIN APP
 // ═══════════════════════════════════════════════════════════════════════════
 export default function App() {
   const showToast = useToast()
+  const [session, setSessionState] = useState(() => getSession())
   const [tab, setTab] = useState('pipeline')
   const [orgs, setOrgs] = useState([])
   const [brokers, setBrokers] = useState([])
@@ -325,6 +413,13 @@ export default function App() {
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n))
   }
 
+  if (!session) {
+    return <LoginScreen onLogin={(user) => setSessionState(user)} />
+  }
+
+  const handleSignOut = () => { clearSession(); setSessionState(null) }
+  const initials = session.name ? session.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase() : 'LW'
+
   return (
     <div style={{ minHeight: '100vh', background: '#F5F7FA' }}>
       {/* Header */}
@@ -377,7 +472,10 @@ export default function App() {
           <button onClick={loadData} style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: 'white', padding: '6px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>
             Refresh
           </button>
-          <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#29ABE2', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 600 }}>JA</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#29ABE2', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600 }} title={session.name}>{initials}</div>
+            <button onClick={handleSignOut} style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: 'rgba(255,255,255,0.7)', padding: '4px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 11 }}>Sign Out</button>
+          </div>
         </div>
       </header>
 
@@ -449,8 +547,14 @@ export default function App() {
 
 // ─── Notification Dropdown ─────────────────────────────────────────────────
 function NotificationDropdown({ notifications, onMarkRead, onClose }) {
+  const ref = useRef(null)
+  useEffect(() => {
+    const handleClickOutside = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose() }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [onClose])
   return (
-    <div style={{ position: 'absolute', top: 40, right: 0, width: 360, maxHeight: 400, overflowY: 'auto', background: 'white', borderRadius: 8, boxShadow: '0 8px 32px rgba(0,0,0,0.2)', zIndex: 1000 }}>
+    <div ref={ref} style={{ position: 'absolute', top: 40, right: 0, width: 360, maxHeight: 400, overflowY: 'auto', background: 'white', borderRadius: 8, boxShadow: '0 8px 32px rgba(0,0,0,0.2)', zIndex: 1000 }}>
       <div style={{ padding: '12px 16px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span style={{ fontWeight: 700, color: '#1A395C', fontSize: 14 }}>Notifications</span>
         <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 16 }}>x</button>
@@ -542,6 +646,8 @@ function OrganizationsTable({ orgs, allOrgs, search, setSearch, stageFilter, set
   const [sortDir, setSortDir] = useState('desc')
   const [page, setPage] = useState(0)
   const pageSize = 25
+
+  useEffect(() => { setPage(0) }, [search, stageFilter, orgs.length])
 
   const sorted = [...orgs].sort((a, b) => {
     let va = a[sortField], vb = b[sortField]
@@ -958,10 +1064,12 @@ function CensusUploadModal({ org, onClose }) {
           processed_at: new Date().toISOString()
         })
       })
-    } catch (e) { console.error('Census upload record error:', e) }
+    } catch { /* census record is non-critical */ }
 
-    // Update org stage
-    await updateOrgStage(org.id, 'Eligibility Analysis').catch(() => {})
+    // Update org stage — only advance, never regress
+    if (STAGES.indexOf(org.pipeline_stage) < STAGES.indexOf('Eligibility Analysis')) {
+      await updateOrgStage(org.id, 'Eligibility Analysis').catch(() => {})
+    }
     await createAuditEntry({
       action: `Census uploaded: ${employees.length} employees imported`,
       action_category: 'census',
@@ -1153,13 +1261,15 @@ function EligibilityModal({ org, onClose }) {
             new_net_per_period: Math.round(newNetPP * 100) / 100,
           })
         })
-      } catch (e) { console.error('Eligibility save error:', e) }
+      } catch { /* individual eligibility save failure — continue */ }
     }
     setResults(calculated)
     setStep('results')
 
-    // Update org stage
-    await updateOrgStage(org.id, 'Employer Review').catch(() => {})
+    // Update org stage — only advance, never regress
+    if (STAGES.indexOf(org.pipeline_stage) < STAGES.indexOf('Employer Review')) {
+      await updateOrgStage(org.id, 'Employer Review').catch(() => {})
+    }
     await createAuditEntry({
       action: `Eligibility analysis completed: ${calculated.filter(c => c.eligibility.is_eligible).length} eligible of ${calculated.length}`,
       action_category: 'eligibility',
@@ -1807,7 +1917,7 @@ function CampaignDetail({ campaign: initialCampaign, orgs, onBack, onRefresh }) 
               You are about to finalize enrollment for <strong>{org?.company_name}</strong>.
             </div>
             <div style={{ fontSize: 13, color: '#64748b' }}>
-              {viewedEmps.length} employees will be marked as Enrolled. {optedOutEmps.length} opted out.
+              {employees.filter(e => e.is_eligible && e.enrollment_status !== 'Opted Out').length} eligible, non-opted-out employees will be marked as Enrolled. {optedOutEmps.length} opted out.
             </div>
           </div>
           <div style={{ padding: 12, background: '#fef3c7', borderRadius: 8, marginBottom: 16, textAlign: 'center' }}>
@@ -1842,7 +1952,6 @@ function CampaignCreatorModal({ org: preSelectedOrg, orgs, onClose, inline }) {
   const [sendEnabled, setSendEnabled] = useState(false)
   const [sending, setSending] = useState(false)
   const [sendProgress, setSendProgress] = useState({ current: 0, total: 0 })
-  const [stopSending, setStopSending] = useState(false)
   const [campaignStatus, setCampaignStatus] = useState('Draft')
   const [reminderGate, setReminderGate] = useState(false)
   const [reminderConfirmText, setReminderConfirmText] = useState('')
@@ -1866,7 +1975,7 @@ function CampaignCreatorModal({ org: preSelectedOrg, orgs, onClose, inline }) {
             await fetch(`${SUPABASE_URL}/rest/v1/employees?id=eq.${e.id}`, {
               method: 'PATCH', headers,
               body: JSON.stringify({ opt_out_id: newId })
-            }).catch(err => console.error('Failed to save opt_out_id:', err))
+            }).catch(() => {})
           }
         }
         setOptOutIds(ids)
@@ -2046,7 +2155,7 @@ function CampaignCreatorModal({ org: preSelectedOrg, orgs, onClose, inline }) {
             campaign_id: campaignId,
             details: { to: TEST_EMAIL_RECIPIENT, original_email: emp.email, subject: body.subject }
           })
-        } catch (e) { console.error('Send error:', e) }
+        } catch { /* individual send failure — continue */ }
       })
       await Promise.all(promises)
       setSendProgress(prev => ({ ...prev, current: Math.min(i + 10, total) }))
@@ -2074,28 +2183,76 @@ function CampaignCreatorModal({ org: preSelectedOrg, orgs, onClose, inline }) {
     if (!stopRef.current) setGate(5)
   }
 
-  const handleStop = () => { stopRef.current = true; setStopSending(true) }
+  const handleStop = () => { stopRef.current = true }
 
   // Gate 5: Reminder
   const sendReminders = async () => {
     if (reminderConfirmText !== 'CONFIRM SEND') return
-    // Same send flow but only for non-viewed, non-opted-out employees
     const reminderEmps = selectedEmployees.filter(e => e.enrollment_status !== 'Opted Out' && !e.enrollment_page_viewed_at)
+    if (reminderEmps.length === 0) {
+      showToast('No employees to remind (all have viewed or opted out).', 'warning')
+      setReminderGate(false); setReminderConfirmText(''); return
+    }
+
+    const freq = selectedOrg?.pay_frequency || 'Semi-Monthly'
+    const endDate = new Date(); endDate.setDate(endDate.getDate() + 14)
+    let sent = 0
+
+    for (const emp of reminderEmps) {
+      const periods = { Weekly: 52, Biweekly: 26, 'Semi-Monthly': 24, Monthly: 12 }
+      const ppy = periods[freq] || 24
+      const netPerCheck = emp.net_benefit_per_period || emp.net_benefit_monthly || 0
+      const fitSav = ((emp.fit_savings_per_period || 0) * ppy / 12).toFixed(2)
+      const ficaSav = (((emp.ss_savings_per_period || 0) + (emp.medicare_savings_per_period || 0)) * ppy / 12).toFixed(2)
+      const body = {
+        to: TEST_EMAIL_RECIPIENT,
+        to_name: `${emp.first_name || ''} ${emp.last_name || ''}`.trim(),
+        subject: `${TEST_SUBJECT_PREFIX}Reminder: Your LW360 Enrollment — ${selectedOrg?.company_name || ''}`,
+        template: selectedOrg?.pay_type === 'trs' ? 'enrollment-trs' : 'enrollment',
+        data: {
+          employee_id: emp.id, campaign_id: campaignId,
+          employee_name: `${emp.first_name || ''} ${emp.last_name || ''}`.trim(),
+          first_name: emp.first_name || '', last_name: emp.last_name || '',
+          company_name: selectedOrg?.company_name || '', pay_frequency: freq,
+          net_increase_per_check: Number(netPerCheck).toFixed(2),
+          fit_savings: fitSav, fica_savings: ficaSav,
+          ee_fee: (emp.lw_fee_per_period || LW_EE_FEE[freq] || 44.87).toFixed(2),
+          enrollment_link: `https://lw360-employee-enrollment.vercel.app/?token=${emp.portal_token || ''}`,
+          opt_out_link: `https://lw360-employee-enrollment.vercel.app/optout?id=${optOutIds[emp.id] || ''}`,
+          days_remaining: 14,
+          enrollment_deadline: endDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
+          effective_date: effectiveDate ? new Date(effectiveDate + 'T12:00:00').toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }) : '',
+          original_recipient: `${emp.first_name || ''} ${emp.last_name || ''} (${emp.email || 'no email'})`,
+        }
+      }
+      try {
+        await fetch(`${SUPABASE_URL}/functions/v1/send-enrollment-email`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+          body: JSON.stringify(body)
+        })
+        await fetch(`${SUPABASE_URL}/rest/v1/employees?id=eq.${emp.id}`, {
+          method: 'PATCH', headers,
+          body: JSON.stringify({ enrollment_email_sent_at: new Date().toISOString() })
+        })
+        await createAuditEntry({
+          action: `Reminder email sent (TEST) for ${emp.first_name} ${emp.last_name}`,
+          action_category: 'reminder',
+          organization_id: selectedOrgId, employee_id: emp.id, campaign_id: campaignId,
+          details: { to: TEST_EMAIL_RECIPIENT, original_email: emp.email }
+        })
+        sent++
+      } catch { /* individual failure — continue */ }
+    }
+
     await createNotification({
       recipient_id: '8fba22c5-1d5b-4549-8465-1f3627d616ea',
-      recipient_type: 'internal',
-      notification_type: 'reminder_ready',
-      title: `Reminder ready for ${selectedOrg?.company_name}`,
-      message: `${reminderEmps.length} employees haven't responded`,
+      recipient_type: 'internal', notification_type: 'reminders_sent',
+      title: `Reminders sent for ${selectedOrg?.company_name}`,
+      message: `${sent} reminder emails sent.`,
       organization_id: selectedOrgId,
     })
-    await createAuditEntry({
-      action: `Reminder trigger approved for ${selectedOrg?.company_name} — ${reminderEmps.length} employees`,
-      action_category: 'reminder',
-      organization_id: selectedOrgId,
-      campaign_id: campaignId,
-    })
-    showToast(`Reminder notification created for ${reminderEmps.length} employees.`, 'success')
+    showToast(`${sent} reminder emails sent.`, 'success')
     setReminderGate(false)
     setReminderConfirmText('')
   }
@@ -2310,9 +2467,14 @@ function CampaignCreatorModal({ org: preSelectedOrg, orgs, onClose, inline }) {
             {!sending ? (
               <div style={{ textAlign: 'center', padding: 20 }}>
                 <div style={{ fontSize: 16, fontWeight: 600, color: '#1A395C', marginBottom: 8 }}>Ready to Send</div>
-                <div style={{ fontSize: 13, color: '#64748b', marginBottom: 20 }}>
+                <div style={{ fontSize: 13, color: '#64748b', marginBottom: 12 }}>
                   {selectedEmployees.length} emails will be sent to {TEST_EMAIL_RECIPIENT}
                 </div>
+                {selectedEmployees.length > 80 && (
+                  <div style={{ padding: '10px 14px', background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 6, marginBottom: 12, fontSize: 12, color: '#92400e', textAlign: 'left' }}>
+                    <strong>SendGrid Free Tier Warning:</strong> Free tier allows 100 emails/day. This campaign has {selectedEmployees.length} recipients. Emails over the daily limit will fail silently. Consider upgrading to a paid SendGrid plan before sending large campaigns.
+                  </div>
+                )}
                 {!sendEnabled && (
                   <div style={{ fontSize: 12, color: '#f59e0b', marginBottom: 12 }}>Send button activating in 5 seconds...</div>
                 )}
